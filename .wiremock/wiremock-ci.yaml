@@ -1,0 +1,20 @@
+# WireMock CLI environment profile: "ci"
+#
+# Overrides the cloud_id values from wiremock.yaml with CI-environment-specific mock API IDs.
+# All other settings (ports, paths, originals) are inherited from the base wiremock.yaml.
+#
+# This file is referenced by Stage 2 and Stage 3 workflows via:
+#   wiremock pull mock-api --all --profile ci
+#   wiremock record-many --profile ci
+#
+# ⚠️  Replace YOUR_IP_API_CI_MOCK_ID and YOUR_WEATHER_API_CI_MOCK_ID with real values.
+#     Create a "ci" environment in WireMock Cloud first:
+#       wiremock environments create --profile ci
+#     Then copy the generated cloud_id values here.
+
+services:
+  ip-api:
+    cloud_id: 'YOUR_IP_API_CI_MOCK_ID'
+
+  weather-api:
+    cloud_id: 'YOUR_WEATHER_API_CI_MOCK_ID'

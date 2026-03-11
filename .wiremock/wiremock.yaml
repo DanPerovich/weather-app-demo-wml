@@ -1,0 +1,30 @@
+# WireMock CLI local environment configuration.
+#
+# Defines two services that mirror the app's external API dependencies:
+#   - ip-api   → http://ip-api.com       (IP geolocation, port 8080)
+#   - weather-api → https://api.weatherapi.com  (weather data, port 8081)
+#
+# Tests point at these ports via IP_API_BASE_URL / WEATHER_API_BASE_URL env vars.
+# The `cloud_id` values below are the *default* (production) WireMock Cloud mock API IDs.
+# The `originals` values are used by `wiremock record-many` in Stage 3 to proxy to live APIs.
+#
+services:
+  ip-api:
+    type: 'Unstructured'
+    name: 'WML-IP API'
+    cloud_id: 'mkg1g'
+    path: './ip-api'
+    port: 8080
+    rewriteOriginHostname: false
+    originals:
+      default: http://ip-api.com
+
+  weather-api:
+    type: 'Unstructured'
+    name: 'WML-Weather API'
+    cloud_id: '49o3r'
+    path: './weather-api'
+    port: 8081
+    rewriteOriginHostname: false
+    originals:
+      default: https://api.weatherapi.com

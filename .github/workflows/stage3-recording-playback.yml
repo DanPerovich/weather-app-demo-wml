@@ -1,0 +1,128 @@
+# ============================================================
+# STAGE 3: Live Re-Recording + Environment Playback
+# ============================================================
+# Before running the test suite against mocks, this workflow
+# first re-records the mock APIs against the live third-party
+# endpoints. This ensures stubs are never stale — each CI run
+# refreshes the recorded data then immediately validates against it.
+#
+# Changes from Stage 2:
+#   - New "Record" phase added before the pull/run/test sequence
+#   - record-many starts proxy servers on the same ports as playback
+#   - The test suite is run once through the recording proxies
+#     (generating real API traffic) and once against the fresh mocks
+#   - WEATHER_API_KEY (real key) is needed only in the recording phase
+#
+# Key concepts demonstrated:
+#   - Non-interactive record-many in a CI pipeline (SIGTERM shutdown)
+#   - Using the same test suite to generate recording traffic and validate stubs
+#   - Environment profiles spanning both recording and playback
+#   - The "always fresh" mocks pattern
+# ============================================================
+
+name: "Stage 3 – Re-Record + Environment Playback"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  record-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install app dependencies
+        run: npm ci
+
+      # ── WireMock CLI setup ─────────────────────────────────
+
+      - name: Install WireMock CLI
+        run: npm install --global @wiremock/cli
+
+      - name: Authenticate with WireMock Cloud
+        run: wiremock config set api_token "${{ secrets.WIREMOCK_API_TOKEN }}"
+
+      # ── PHASE 1: Record fresh stubs from live APIs ─────────
+      #
+      # record-many reads .wiremock/wiremock.yaml to find:
+      #   - Which ports to proxy on (8080, 8081)
+      #   - Which live URLs to proxy to (originals.default)
+      #
+      # The --profile flag tells it to save recorded stubs to the
+      # CI environment's cloud mock API IDs (from wiremock-ci.yaml)
+      # rather than the base production IDs.
+      #
+      # Non-interactive mode: the process responds to SIGTERM by
+      # flushing all captured traffic to WireMock Cloud then exiting.
+
+      - name: Start recording proxies (record-many)
+        run: |
+          wiremock record-many --profile ${{ vars.WIREMOCK_PROFILE }} \
+            > record-many.log 2>&1 &
+          echo "RECORD_PID=$!" >> $GITHUB_ENV
+          # Wait until both recording proxies are ready
+          timeout 30 bash -c 'until nc -z localhost 8080 && nc -z localhost 8081; do sleep 1; done'
+          echo "✓ Recording proxies ready on :8080 (→ ip-api.com) and :8081 (→ api.weatherapi.com)"
+
+      - name: Run tests through recording proxies (captures live API traffic)
+        env:
+          # Same ports as playback — the proxies forward to real APIs and record simultaneously
+          IP_API_BASE_URL: http://localhost:8080
+          WEATHER_API_BASE_URL: http://localhost:8081
+          # Real API key required here so WeatherAPI requests actually succeed
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+        run: |
+          echo "→ Running tests against live APIs through recording proxies..."
+          npm test
+
+      - name: Stop recording and upload stubs to WireMock Cloud
+        run: |
+          echo "→ Sending SIGTERM to stop recording and flush stubs to WireMock Cloud..."
+          pkill -TERM -P $RECORD_PID 2>/dev/null || true
+
+          # Wait for graceful shutdown (stubs upload happens during shutdown)
+          TIMEOUT=30
+          COUNT=0
+          while kill -0 $RECORD_PID 2>/dev/null && [ $COUNT -lt $TIMEOUT ]; do
+            sleep 1
+            COUNT=$((COUNT + 1))
+          done
+
+          echo "=== record-many output ==="
+          cat record-many.log
+          echo "✓ Stubs uploaded to WireMock Cloud CI environment"
+
+      # ── PHASE 2: Pull fresh stubs and run in playback mode ─
+
+      - name: Pull freshly recorded stubs from WireMock Cloud
+        run: |
+          wiremock pull mock-api --all --profile ${{ vars.WIREMOCK_PROFILE }}
+          echo "✓ Fresh stubs pulled from CI environment"
+
+      - name: Start WireMock local playback
+        run: |
+          wiremock run &
+          timeout 30 bash -c 'until nc -z localhost 8080 && nc -z localhost 8081; do sleep 1; done'
+          echo "✓ Mock servers ready on :8080 (ip-api) and :8081 (weather-api)"
+
+      # ── Run the test suite against the freshly recorded mocks ──
+
+      - name: Run tests against WireMock playback (validates fresh stubs)
+        env:
+          IP_API_BASE_URL: http://localhost:8080
+          WEATHER_API_BASE_URL: http://localhost:8081
+          # Stubs don't match on the key — any value works in playback
+          WEATHER_API_KEY: mock-key
+        run: |
+          echo "→ Running tests against freshly recorded WireMock stubs..."
+          npm test

@@ -1,0 +1,82 @@
+# ============================================================
+# STAGE 2: Environment-Based Mock Pull
+# ============================================================
+# Replaces the hardcoded mock API IDs from Stage 1 with a
+# WireMock environment profile. The workflow no longer needs
+# to know individual mock API IDs — it just names the profile
+# and the CLI resolves which cloud IDs to pull from.
+#
+# Changes from Stage 1:
+#   - Pull command switches from explicit IDs to --profile flag
+#   - WIREMOCK_PROFILE is a GitHub Actions variable (not secret)
+#     so it can be changed per-environment without editing YAML
+#
+# Key concepts demonstrated:
+#   - WireMock Cloud environments (profile = named set of mock APIs)
+#   - Decoupling mock API identity from the CI workflow definition
+#   - How the profile overlay (.wiremock/wiremock-ci.yaml) works
+# ============================================================
+
+name: "Stage 2 – Environment-Based Playback"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-with-mocks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install app dependencies
+        run: npm ci
+
+      # ── WireMock CLI setup ─────────────────────────────────
+
+      - name: Install WireMock CLI
+        run: npm install --global @wiremock/cli
+
+      - name: Authenticate with WireMock Cloud
+        run: wiremock config set api_token "${{ secrets.WIREMOCK_API_TOKEN }}"
+
+      # ── Pull mock APIs via environment profile ─────────────
+      #
+      # Instead of passing IDs, we name the environment profile.
+      # The CLI reads .wiremock/wiremock-ci.yaml (the profile overlay)
+      # and uses its cloud_id values to determine which mock APIs to pull.
+      # Port assignments and paths still come from .wiremock/wiremock.yaml.
+      #
+      # To add a new environment (e.g. "staging"), you only need to:
+      #   1. Run: wiremock environments create --profile staging
+      #   2. Commit the generated .wiremock/wiremock-staging.yaml
+      #   3. Change WIREMOCK_PROFILE to "staging" in GitHub repo variables
+
+      - name: Pull mock APIs from WireMock Cloud (via environment profile)
+        run: wiremock pull mock-api --all --profile ${{ vars.WIREMOCK_PROFILE }}
+
+      # ── Start local playback ───────────────────────────────
+
+      - name: Start WireMock local playback
+        run: |
+          wiremock run &
+          timeout 30 bash -c 'until nc -z localhost 8080 && nc -z localhost 8081; do sleep 1; done'
+          echo "✓ Mock servers ready on :8080 (ip-api) and :8081 (weather-api)"
+
+      # ── Run the test suite against mocks ──────────────────
+
+      - name: Run tests against WireMock playback
+        env:
+          IP_API_BASE_URL: http://localhost:8080
+          WEATHER_API_BASE_URL: http://localhost:8081
+          WEATHER_API_KEY: mock-key
+        run: npm test

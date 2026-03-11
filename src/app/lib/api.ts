@@ -1,9 +1,19 @@
 import axios from 'axios';
 import { IpApiResponse, WeatherApiResponse, ipApiResponseSchema, weatherApiResponseSchema, WeatherData } from './types';
 
-// Base URLs for the APIs
-const IP_API_BASE_URL = 'http://ip-api.com';
-const WEATHER_API_BASE_URL = 'https://api.weatherapi.com';
+// Base URLs — two layers of override:
+//   1. IP_API_BASE_URL / WEATHER_API_BASE_URL  — for CI/test (Node, no NEXT_PUBLIC_ needed)
+//   2. NEXT_PUBLIC_IP_API_BASE_URL / NEXT_PUBLIC_WEATHER_API_BASE_URL — for browser/dev mode
+// Falls back to the real third-party endpoints when neither is set.
+const IP_API_BASE_URL =
+  process.env.IP_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_IP_API_BASE_URL ??
+  'http://ip-api.com';
+
+const WEATHER_API_BASE_URL =
+  process.env.WEATHER_API_BASE_URL ??
+  process.env.NEXT_PUBLIC_WEATHER_API_BASE_URL ??
+  'https://api.weatherapi.com';
 
 /**
  * Fetches the user's location data based on their IP address
@@ -44,11 +54,11 @@ export async function fetchLocationByIp(): Promise<IpApiResponse> {
  * Fetches weather data for the given coordinates
  */
 export async function fetchWeatherData(lat: number, lon: number): Promise<WeatherApiResponse> {
-  // Get API key from environment variable
-  const API_KEY = process.env.NEXT_PUBLIC_WEATHER_API_KEY;
-  
+  // NEXT_PUBLIC_ prefix exposes this to the browser bundle; WEATHER_API_KEY is used in Node/test contexts.
+  const API_KEY = process.env.NEXT_PUBLIC_WEATHER_API_KEY ?? process.env.WEATHER_API_KEY;
+
   if (!API_KEY) {
-    throw new Error('Weather API key is not set. Please set the NEXT_PUBLIC_WEATHER_API_KEY environment variable.');
+    throw new Error('Weather API key is not set. Please set WEATHER_API_KEY (or NEXT_PUBLIC_WEATHER_API_KEY for browser).');
   }
   
   try {
