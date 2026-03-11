@@ -68,6 +68,7 @@ jobs:
       - name: Start recording proxies (record-many)
         run: |
           wiremock record-many --profile ${{ vars.WIREMOCK_PROFILE }} \
+            --import-config-file=.wiremock/recording-config.yaml \
             > record-many.log 2>&1 &
           echo "RECORD_PID=$!" >> $GITHUB_ENV
           # Wait until both recording proxies are ready

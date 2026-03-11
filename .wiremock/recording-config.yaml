@@ -1,0 +1,23 @@
+# Recording import configuration for wiremock record-many.
+#
+# Problem this solves:
+#   WeatherAPI.com requires a real API key in the query string:
+#     GET /v1/current.json?key=REAL_KEY&q=51.5074,-0.1278&aqi=no
+#   By default, record-many captures all query params as matchers, so the
+#   recorded stub would only match requests with key=REAL_KEY. In playback,
+#   tests use WEATHER_API_KEY=mock-key, which causes 404s.
+#
+# Fix:
+#   The transformation rule below detects requests to /v1/current.json and
+#   replaces the default full-URL matcher with a path-only matcher, so the
+#   recorded stub matches any request to that path regardless of query params.
+
+import:
+  duplicatePolicy: overwrite
+  stubTemplateTransformationRules:
+    - filter:
+        request:
+          urlPath: "/v1/current.json"
+      template:
+        request:
+          urlPathTemplate: "/v1/current.json"
